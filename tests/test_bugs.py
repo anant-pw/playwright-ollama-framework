@@ -1,10 +1,8 @@
 # tests/test_bugs.py
 #
-# FIX: RUN_ID is shared via run_context — but test_bugs.py collects BEFORE
-# run_agents.py runs (pytest collection happens first). So we scan ALL
-# subfolders and pick the most recent run's bugs at collection time.
-#
-# This ensures bugs saved by run_agents.py are always picked up correctly.
+# FIX: Load bugs at EXECUTION time not collection time.
+# Uses a session-scoped marker file written by run_agents.py to find
+# the current run's bug folder reliably.
 
 import pytest
 import allure
@@ -20,99 +18,100 @@ _SEVERITY_MAP = {
 }
 
 
-def _find_latest_run_bugs() -> tuple:
-    """
-    Find bugs from the most recently modified run subfolder.
-    Returns (run_id, bug_dir, bugs_list).
-    This handles the case where pytest collects tests before run_agents.py runs.
-    """
+def _get_current_run_id() -> str:
+    """Get RUN_ID from run_context — same module so same timestamp."""
+    try:
+        from run_context import RUN_ID
+        return RUN_ID
+    except Exception:
+        return None
+
+
+def _load_bugs_for_run(run_id: str) -> list:
+    """Load bugs from a specific run folder."""
+    from config import CFG
+    bug_dir = os.path.join(CFG.bug_reports_dir, run_id)
+
+    if not os.path.isdir(bug_dir):
+        return []
+
+    files = sorted(glob.glob(os.path.join(bug_dir, "bug_*.json")))
+    bugs  = []
+    for f in files:
+        try:
+            data = json.load(open(f, encoding="utf-8"))
+            data["_source_file"] = f
+            bugs.append(data)
+        except Exception as e:
+            print(f"[BUG] Could not read {f}: {e}")
+
+    print(f"[BUG] Loaded {len(bugs)} bug(s) from run {run_id}")
+    return bugs
+
+
+def _load_most_recent_bugs() -> tuple:
+    """Fallback: find most recent run folder with bugs."""
     from config import CFG
     bug_base = CFG.bug_reports_dir
 
     if not os.path.isdir(bug_base):
-        return None, None, []
+        return None, []
 
-    # Find all run subfolders (named like 20260317_002415)
     subfolders = sorted([
         d for d in os.listdir(bug_base)
         if os.path.isdir(os.path.join(bug_base, d))
-    ], reverse=True)  # Most recent first
+    ], reverse=True)
 
-    if not subfolders:
-        return None, None, []
-
-    # Use the most recent folder that has bug files
     for folder in subfolders:
-        bug_dir = os.path.join(bug_base, folder)
-        files   = sorted(glob.glob(os.path.join(bug_dir, "bug_*.json")))
-        if files:
-            bugs = []
-            for f in files:
-                try:
-                    data = json.load(open(f, encoding="utf-8"))
-                    data["_source_file"] = f
-                    bugs.append(data)
-                except Exception as e:
-                    print(f"[BUG] Could not read {f}: {e}")
-            if bugs:
-                print(f"[BUG] Loaded {len(bugs)} bug(s) from run {folder}")
-                return folder, bug_dir, bugs
+        bugs = _load_bugs_for_run(folder)
+        if bugs:
+            return folder, bugs
 
-    return None, None, []
-
-
-def _load_bugs() -> tuple:
-    """Load bugs — try current run first, fall back to latest run."""
-    # Try to get current RUN_ID from run_context
-    try:
-        from run_context import RUN_ID, BUG_RUN_DIR
-        if os.path.isdir(BUG_RUN_DIR):
-            files = sorted(glob.glob(os.path.join(BUG_RUN_DIR, "bug_*.json")))
-            if files:
-                bugs = []
-                for f in files:
-                    try:
-                        data = json.load(open(f, encoding="utf-8"))
-                        data["_source_file"] = f
-                        bugs.append(data)
-                    except Exception as e:
-                        print(f"[BUG] Could not read {f}: {e}")
-                if bugs:
-                    print(f"[BUG] Loaded {len(bugs)} bug(s) from run {RUN_ID}")
-                    return RUN_ID, bugs
-    except Exception as e:
-        print(f"[BUG] run_context error: {e}")
-
-    # Fall back to most recent run with bugs
-    run_id, _, bugs = _find_latest_run_bugs()
-    return run_id, bugs
+    return None, []
 
 
 def pytest_generate_tests(metafunc):
     if "bug_row" in metafunc.fixturenames:
-        run_id, bugs = _load_bugs()
-        if bugs:
-            metafunc.parametrize(
-                "bug_row",
-                bugs,
-                ids=[
-                    os.path.splitext(os.path.basename(b["_source_file"]))[0]
-                    for b in bugs
-                ],
-            )
-        else:
-            metafunc.parametrize("bug_row", [None], ids=["no_bugs_this_run"])
+        # At collection time just create a single placeholder
+        # Actual bugs are loaded at execution time via the fixture
+        metafunc.parametrize("bug_row", ["__load_at_runtime__"],
+                             ids=["bugs"])
 
 
 @allure.feature("Bug Reports")
 def test_bug(bug_row):
     """
-    One FAILED Allure test per detected bug.
-    Bugs show as red FAILED tests with severity badge in the report.
+    Dynamically loads bugs at execution time — after run_agents.py has run.
+    Shows one FAILED Allure entry per bug found.
     """
-    if bug_row is None:
+    # Load bugs NOW (at execution time, not collection time)
+    run_id = _get_current_run_id()
+    bugs   = _load_bugs_for_run(run_id) if run_id else []
+
+    # If current run has no bugs yet, try most recent run
+    if not bugs:
+        run_id, bugs = _load_most_recent_bugs()
+
+    if not bugs:
         pytest.skip("No bugs detected in this run.")
 
+    # Report each bug as a separate allure step + fail at end
+    bug_titles = []
+    for bug in bugs:
+        _report_bug_to_allure(bug)
+        severity = bug.get("severity", "Medium").lower()
+        title    = bug.get("title", "Unnamed Bug")
+        bug_titles.append(f"[{severity.upper()}] {title}")
+
+    # Fail the test so bugs show as RED in Allure
+    pytest.fail(
+        f"{len(bugs)} bug(s) detected in run {run_id}:\n\n" +
+        "\n".join(f"  • {t}" for t in bug_titles)
+    )
+
+
+def _report_bug_to_allure(bug_row: dict):
+    """Attach a single bug's details to the current Allure test."""
     run_id      = bug_row.get("run_id",      "unknown")
     title       = bug_row.get("title",       "Unnamed Bug")
     description = bug_row.get("description", "")
@@ -123,45 +122,28 @@ def test_bug(bug_row):
     extra       = bug_row.get("additional_info", {})
 
     allure.dynamic.story(f"Run: {run_id}")
-    allure.dynamic.title(f"BUG: {title}")
     allure.dynamic.severity(_SEVERITY_MAP.get(severity, allure.severity_level.NORMAL))
-    allure.dynamic.description(
-        f"**Run ID:** {run_id}\n\n"
-        f"**Detected:** {timestamp}\n\n"
-        f"**Description:**\n{description}"
-    )
-    allure.dynamic.tag(f"run:{run_id}")
-    allure.dynamic.tag(f"severity:{severity}")
-    if extra.get("category"):
-        allure.dynamic.tag(f"category:{extra['category']}")
 
-    # Attach full report JSON
-    allure.attach(
-        json.dumps({k: v for k, v in bug_row.items() if k != "_source_file"},
-                   indent=2, default=str),
-        name="Full Bug Report",
-        attachment_type=allure.attachment_type.JSON,
-    )
+    with allure.step(f"BUG [{severity.upper()}]: {title}"):
+        allure.attach(
+            json.dumps({k: v for k, v in bug_row.items()
+                        if k != "_source_file"}, indent=2, default=str),
+            name=f"Bug Report - {title[:50]}",
+            attachment_type=allure.attachment_type.JSON,
+        )
 
-    # Attach screenshot
-    if screenshot:
-        abs_ss = os.path.abspath(screenshot)
-        if os.path.exists(abs_ss):
-            with open(abs_ss, "rb") as f:
-                allure.attach(f.read(), name="Bug Screenshot",
-                              attachment_type=allure.attachment_type.PNG)
-        else:
-            print(f"[BUG] Screenshot not found: {abs_ss}")
+        allure.attach(
+            f"Run ID: {run_id}\nDetected: {timestamp}\n\n{description}",
+            name="Description",
+            attachment_type=allure.attachment_type.TEXT,
+        )
 
-    with allure.step("Bug details"):
-        with allure.step(f"Description: {description[:120]}"):
-            allure.attach(description, name="Full Description",
-                          attachment_type=allure.attachment_type.TEXT)
-
-        if steps:
-            for i, step in enumerate(steps, 1):
-                with allure.step(f"Step {i}: {step}"):
-                    pass
+        if screenshot:
+            abs_ss = os.path.abspath(screenshot)
+            if os.path.exists(abs_ss):
+                with open(abs_ss, "rb") as f:
+                    allure.attach(f.read(), name=f"Screenshot - {title[:40]}",
+                                  attachment_type=allure.attachment_type.PNG)
 
         if extra:
             allure.attach(
@@ -179,5 +161,7 @@ def test_bug(bug_row):
             allure.attach("\n".join(failed_reqs), name="Failed Network Requests",
                           attachment_type=allure.attachment_type.TEXT)
 
-    # Bugs = FAILED tests in Allure (shows red with severity badge)
-    pytest.fail(f"[{severity.upper()}] {title}\n\n{description}")
+        if steps:
+            for i, step in enumerate(steps, 1):
+                with allure.step(f"Step {i}: {step}"):
+                    pass
