@@ -1,0 +1,8 @@
+playwright
+pytest
+pytest-playwright
+allure-pytest
+allure-python-commons
+pandas
+openpyxl
+requests
