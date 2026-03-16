@@ -1,8 +1,13 @@
 # ai/ollama_client.py — all config now comes from config.py / config.env
+#
+# FIX: MODEL is now re-read from environment at health-check time.
+# Previously MODEL was set once at import time — before Jenkins env vars
+# were fully loaded — causing the configured model to be ignored.
 
 import requests
 import allure
 import time
+import os
 from config import CFG
 
 # These are runtime variables — they may be mutated by auto-detect logic
@@ -16,9 +21,23 @@ _health_checked = False
 
 
 def check_health() -> bool:
-    global _health_checked, MODEL, GENERATE_URL, TAGS_URL
+    global _health_checked, MODEL, OLLAMA_HOST, GENERATE_URL, TAGS_URL
+
     if _health_checked:
         return True
+
+    # Re-read model from environment — Jenkins sets this AFTER module import
+    env_model = os.environ.get("OLLAMA_MODEL", "").strip()
+    if env_model and env_model != MODEL:
+        print(f"[OLLAMA] Model updated from env: '{MODEL}' -> '{env_model}'")
+        MODEL = env_model
+
+    # Re-read host from environment too
+    env_host = os.environ.get("OLLAMA_HOST", "").strip()
+    if env_host and env_host != OLLAMA_HOST:
+        OLLAMA_HOST  = env_host
+        GENERATE_URL = f"{OLLAMA_HOST}/api/generate"
+        TAGS_URL     = f"{OLLAMA_HOST}/api/tags"
 
     try:
         r = requests.get(TAGS_URL, timeout=(CFG.ollama_connect_timeout, 10))
@@ -33,23 +52,22 @@ def check_health() -> bool:
         except Exception:
             pass
 
-        # Auto-switch if configured model not found
-        if not any(MODEL in m for m in models):
-            if models:
-                preferred = next((m for m in models if "llama" in m.lower()), models[0])
-                auto_model = preferred.split(":")[0]
-                print(f"[OLLAMA] '{MODEL}' not found — auto-switching to '{auto_model}'")
-                try:
-                    allure.attach(
-                        f"Model '{MODEL}' not found.\nAuto-switched to: '{auto_model}'\nAvailable: {models}",
-                        name="⚠ Ollama Model Auto-Switch",
-                        attachment_type=allure.attachment_type.TEXT,
-                    )
-                except Exception:
-                    pass
-                MODEL = auto_model
-            else:
-                print(f"[WARN] No models in Ollama. Run: ollama pull {MODEL}")
+        # Auto-switch only if configured model is truly not found
+        if models and not any(MODEL in m for m in models):
+            preferred = next((m for m in models if "llama" in m.lower()), models[0])
+            auto_model = preferred.split(":")[0]
+            print(f"[OLLAMA] '{MODEL}' not found — auto-switching to '{auto_model}'")
+            try:
+                allure.attach(
+                    f"Model '{MODEL}' not found.\nAuto-switched to: '{auto_model}'\nAvailable: {models}",
+                    name="⚠ Ollama Model Auto-Switch",
+                    attachment_type=allure.attachment_type.TEXT,
+                )
+            except Exception:
+                pass
+            MODEL = auto_model
+        elif not models:
+            print(f"[WARN] No models in Ollama. Run: ollama pull {MODEL}")
 
         _health_checked = True
         return True
@@ -72,7 +90,7 @@ def check_health() -> bool:
 def generate(prompt: str, model: str = None, retries: int = None) -> str:
     check_health()
 
-    target_model   = model   or MODEL
+    target_model   = model or MODEL
     total_attempts = (retries if retries is not None else CFG.ollama_retries) + 1
     payload = {"model": target_model, "prompt": prompt, "stream": False}
     last_error = None

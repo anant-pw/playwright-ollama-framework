@@ -1,14 +1,16 @@
 # tests/test_bugs.py
 #
-# FIX: Now reads ONLY bugs from this run's subfolder (bug_reports/RUN_ID/)
-# so each Allure build shows only that run's bugs — not every bug ever found.
+# FIX: RUN_ID is shared via run_context — but test_bugs.py collects BEFORE
+# run_agents.py runs (pytest collection happens first). So we scan ALL
+# subfolders and pick the most recent run's bugs at collection time.
+#
+# This ensures bugs saved by run_agents.py are always picked up correctly.
 
 import pytest
 import allure
 import glob
 import json
 import os
-from run_context import RUN_ID, BUG_RUN_DIR
 
 _SEVERITY_MAP = {
     "critical": allure.severity_level.CRITICAL,
@@ -18,31 +20,77 @@ _SEVERITY_MAP = {
 }
 
 
-def _load_bugs() -> list:
-    """Load bugs from this run's folder only."""
-    if not os.path.isdir(BUG_RUN_DIR):
-        print(f"[BUG] No bug folder for run {RUN_ID}: {BUG_RUN_DIR}")
-        return []
+def _find_latest_run_bugs() -> tuple:
+    """
+    Find bugs from the most recently modified run subfolder.
+    Returns (run_id, bug_dir, bugs_list).
+    This handles the case where pytest collects tests before run_agents.py runs.
+    """
+    from config import CFG
+    bug_base = CFG.bug_reports_dir
 
-    # New format: bug_001.json, bug_002.json
-    files = sorted(glob.glob(os.path.join(BUG_RUN_DIR, "bug_*.json")))
+    if not os.path.isdir(bug_base):
+        return None, None, []
 
-    bugs = []
-    for f in files:
-        try:
-            data = json.load(open(f, encoding="utf-8"))
-            data["_source_file"] = f
-            bugs.append(data)
-        except Exception as e:
-            print(f"[BUG] Could not read {f}: {e}")
+    # Find all run subfolders (named like 20260317_002415)
+    subfolders = sorted([
+        d for d in os.listdir(bug_base)
+        if os.path.isdir(os.path.join(bug_base, d))
+    ], reverse=True)  # Most recent first
 
-    print(f"[BUG] Loaded {len(bugs)} bug(s) from run {RUN_ID}")
-    return bugs
+    if not subfolders:
+        return None, None, []
+
+    # Use the most recent folder that has bug files
+    for folder in subfolders:
+        bug_dir = os.path.join(bug_base, folder)
+        files   = sorted(glob.glob(os.path.join(bug_dir, "bug_*.json")))
+        if files:
+            bugs = []
+            for f in files:
+                try:
+                    data = json.load(open(f, encoding="utf-8"))
+                    data["_source_file"] = f
+                    bugs.append(data)
+                except Exception as e:
+                    print(f"[BUG] Could not read {f}: {e}")
+            if bugs:
+                print(f"[BUG] Loaded {len(bugs)} bug(s) from run {folder}")
+                return folder, bug_dir, bugs
+
+    return None, None, []
+
+
+def _load_bugs() -> tuple:
+    """Load bugs — try current run first, fall back to latest run."""
+    # Try to get current RUN_ID from run_context
+    try:
+        from run_context import RUN_ID, BUG_RUN_DIR
+        if os.path.isdir(BUG_RUN_DIR):
+            files = sorted(glob.glob(os.path.join(BUG_RUN_DIR, "bug_*.json")))
+            if files:
+                bugs = []
+                for f in files:
+                    try:
+                        data = json.load(open(f, encoding="utf-8"))
+                        data["_source_file"] = f
+                        bugs.append(data)
+                    except Exception as e:
+                        print(f"[BUG] Could not read {f}: {e}")
+                if bugs:
+                    print(f"[BUG] Loaded {len(bugs)} bug(s) from run {RUN_ID}")
+                    return RUN_ID, bugs
+    except Exception as e:
+        print(f"[BUG] run_context error: {e}")
+
+    # Fall back to most recent run with bugs
+    run_id, _, bugs = _find_latest_run_bugs()
+    return run_id, bugs
 
 
 def pytest_generate_tests(metafunc):
     if "bug_row" in metafunc.fixturenames:
-        bugs = _load_bugs()
+        run_id, bugs = _load_bugs()
         if bugs:
             metafunc.parametrize(
                 "bug_row",
@@ -57,15 +105,15 @@ def pytest_generate_tests(metafunc):
 
 
 @allure.feature("Bug Reports")
-@allure.story(f"Run: {RUN_ID}")
 def test_bug(bug_row):
     """
-    One FAILED Allure test per detected bug, scoped to this run only.
+    One FAILED Allure test per detected bug.
     Bugs show as red FAILED tests with severity badge in the report.
     """
     if bug_row is None:
-        pytest.skip(f"No bugs detected in run {RUN_ID}.")
+        pytest.skip("No bugs detected in this run.")
 
+    run_id      = bug_row.get("run_id",      "unknown")
     title       = bug_row.get("title",       "Unnamed Bug")
     description = bug_row.get("description", "")
     severity    = bug_row.get("severity",    "Medium").lower()
@@ -73,8 +121,8 @@ def test_bug(bug_row):
     screenshot  = bug_row.get("screenshot",  None)
     steps       = bug_row.get("steps_to_reproduce", [])
     extra       = bug_row.get("additional_info", {})
-    run_id      = bug_row.get("run_id", RUN_ID)
 
+    allure.dynamic.story(f"Run: {run_id}")
     allure.dynamic.title(f"BUG: {title}")
     allure.dynamic.severity(_SEVERITY_MAP.get(severity, allure.severity_level.NORMAL))
     allure.dynamic.description(
@@ -122,21 +170,14 @@ def test_bug(bug_row):
                 attachment_type=allure.attachment_type.JSON,
             )
 
-        # Attach console errors and failed requests if present
         console_errs = extra.get("console_errors", [])
         failed_reqs  = extra.get("failed_requests", [])
         if console_errs:
-            allure.attach(
-                "\n".join(console_errs),
-                name="Console Errors",
-                attachment_type=allure.attachment_type.TEXT,
-            )
+            allure.attach("\n".join(console_errs), name="Console Errors",
+                          attachment_type=allure.attachment_type.TEXT)
         if failed_reqs:
-            allure.attach(
-                "\n".join(failed_reqs),
-                name="Failed Network Requests",
-                attachment_type=allure.attachment_type.TEXT,
-            )
+            allure.attach("\n".join(failed_reqs), name="Failed Network Requests",
+                          attachment_type=allure.attachment_type.TEXT)
 
     # Bugs = FAILED tests in Allure (shows red with severity badge)
     pytest.fail(f"[{severity.upper()}] {title}\n\n{description}")
