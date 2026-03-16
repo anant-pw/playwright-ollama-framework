@@ -20,11 +20,11 @@ pipeline {
         
         stage('Test') {
             steps {
-                bat """
-                    set TARGET_URLS=%TARGET_URLS%
-                    set BROWSER=%BROWSER%
-                    pytest --alluredir=allure-results -v
-                """
+                bat '''
+                    set TARGET_URLS=https://phet-dev.colorado.edu/html/build-an-atom/0.0.0-3/simple-text-only-test-page.html
+                    set BROWSER=chromium
+                    python -X utf8 pytest --alluredir=allure-results -v
+            '''
             }
         }
         
