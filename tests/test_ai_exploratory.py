@@ -1,24 +1,22 @@
-from config import CFG
 # tests/test_ai_exploratory.py
 #
 # FIXES:
-# 1. perform_action() was called but never defined — caused NameError.
-# 2. detect_bug() was called but never imported — caused NameError.
-# 3. save_bug_report() called with keyword args that don't match signature.
-# 4. ask_ai() was called with a tuple (page_info) instead of unpacked args.
-# 5. Added @allure decorators for report visibility.
-# 6. Added element_ranker import (file now exists).
+# 1. detect_bug() now returns a DICT not a string — updated all checks
+# 2. collect_page_signals() added — passes real browser signals to detect_bug()
+# 3. Bug saving now uses dict directly instead of string .upper() check
+# 4. generate_bug_report() receives the structured dict correctly
 
 import allure
 import pytest
 from ai.ai_client import ask_ai
-from ai.bug_detector import detect_bug
+from ai.bug_detector import detect_bug, collect_page_signals
 from ai.parser import parse_ai_action
 from browser.dom_extractor import extract_page_info, extract_clickable_elements
 from browser.element_ranker import rank_elements
 from browser.screenshot import capture_bug_screenshot
 from browser.validator import validate_target
 from reporting.bug_reporter import save_bug_report, generate_bug_report
+from config import CFG
 
 
 def _perform_action(page, action: str, target: str | None):
@@ -35,7 +33,7 @@ def _perform_action(page, action: str, target: str | None):
 @allure.feature("AI Exploratory Testing")
 @allure.story("Autonomous exploration with bug detection")
 @allure.severity(allure.severity_level.CRITICAL)
-@allure.title("AI Exploratory Test — example.com")
+@allure.title("AI Exploratory Test")
 def test_ai_exploration(page):
 
     with allure.step("Navigate to target"):
@@ -77,21 +75,46 @@ def test_ai_exploration(page):
             # Capture after-state and detect bugs
             with allure.step("Bug detection after action"):
                 after_text, *_ = extract_page_info(page)
-                bug_result = detect_bug(after_text)
 
-                if "NO BUG" not in bug_result.upper():
-                    with allure.step("🐛 Bug found — saving report"):
-                        ss_path = capture_bug_screenshot(page, label=f"explore_bug_step{step+1}")
+                # Collect real browser signals (console errors, failed requests etc.)
+                signals = collect_page_signals(page)
+
+                # detect_bug() returns a dict — NOT a string
+                bug_result = detect_bug(after_text, page_signals=signals)
+
+                allure.attach(
+                    f"Found: {bug_result.get('found')} | "
+                    f"Severity: {bug_result.get('severity')} | "
+                    f"Title: {bug_result.get('title')}",
+                    name="Bug Detection Summary",
+                    attachment_type=allure.attachment_type.TEXT,
+                )
+
+                # Check the 'found' key — not .upper() on a string
+                if bug_result.get("found", False):
+                    with allure.step(f"Bug found: {bug_result.get('title', 'Unknown')}"):
+                        ss_path = capture_bug_screenshot(
+                            page, label=f"explore_bug_step{step + 1}"
+                        )
+                        # Attach screenshot path to bug result before saving
+                        bug_result["screenshot"] = ss_path
+
+                        # generate_bug_report accepts a dict directly
                         bug_report = generate_bug_report(
                             bug_result, after_text, allure_attach=True
                         )
-                        bug_report["screenshot"] = ss_path
                         save_bug_report(bug_report)
 
                         if ss_path:
-                            with open(ss_path, "rb") as f:
-                                allure.attach(f.read(), name="Bug Screenshot",
-                                              attachment_type=allure.attachment_type.PNG)
+                            try:
+                                with open(ss_path, "rb") as f:
+                                    allure.attach(
+                                        f.read(),
+                                        name="Bug Screenshot",
+                                        attachment_type=allure.attachment_type.PNG,
+                                    )
+                            except Exception as e:
+                                print(f"[WARN] Could not attach screenshot: {e}")
 
             if action == "stop" or action is None:
                 with allure.step("Agent chose to stop"):
