@@ -12,6 +12,9 @@ pipeline {
                 bat 'python --version'
                 bat 'pip install -r requirements.txt'
                 bat 'playwright install'
+                // FIX: Set UTF-8 encoding for Python console
+                bat 'set PYTHONIOENCODING=utf-8'
+                bat 'set PYTHONUNBUFFERED=1'
             }
         }
         
