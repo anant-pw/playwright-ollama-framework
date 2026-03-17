@@ -12,7 +12,6 @@ pipeline {
                 bat 'python --version'
                 bat 'pip install -r requirements.txt'
                 bat 'playwright install'
-                // FIX: Set UTF-8 encoding for Python console
                 bat 'set PYTHONIOENCODING=utf-8'
                 bat 'set PYTHONUNBUFFERED=1'
             }
@@ -21,34 +20,34 @@ pipeline {
         stage('Test') {
             steps {
                 bat 'python.exe -X utf8 -m pytest --alluredir=allure-results -v'
-            
             }
         }
-        stage('Generate Allure Report') {
-            steps {
+    }
+    
+    // THIS RUNS NO MATTER WHAT (pass/fail)
+    post {
+        always {
+            script {
+                // Generate Allure Report
                 allure([
                     includeProperties: false,
                     jdk: '',
                     results: [[path: 'allure-results']]
-                    ])
-            }
-        }
-
-        
-        stage('Report') {
-            steps {
-                allure includeProperties: false, 
-                       results: [[path: 'allure-results']]
-            }
-            post {
-                always {
-                    // Generate Allure report EVEN ON FAILURE
-                    allure([
-                        includeProperties: false,
-                        jdk: '',
-                        results: [[path: 'allure-results']]
-                    ])
-                }
+                ])
+                
+                // Publish HTML reports
+                publishHTML([
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'allure-report',
+                    reportFiles: 'index.html',
+                    reportName: 'Allure Report'
+                ])
+                
+                // Archive artifacts
+                archiveArtifacts artifacts: 'allure-results/**, bug_reports/**, screenshots/**', 
+                               allowEmptyArchive: true
             }
         }
     }
