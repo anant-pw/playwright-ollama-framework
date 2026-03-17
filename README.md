@@ -1,87 +1,161 @@
-# AI Autonomous Testing Framework
+# AI-Powered Autonomous Testing Framework (Playwright + Python)
 
-## Quick Start
+## Overview
 
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-playwright install chromium
+This project is a learning-driven prototype to explore how AI can be used in test automation beyond traditional scripted approaches.
 
-# 2. Make sure Ollama is running with llama3
-ollama pull llama3
-ollama serve          # in a separate terminal
+Instead of relying only on predefined test cases, the framework attempts to:
 
-# 3. Run all tests and collect Allure results
-pytest
+* Observe the application
+* Decide what to do next using AI
+* Perform exploratory-style testing
+* Capture and report findings
 
-# 4. Open the HTML report
-allure serve allure-results
+This is not a production-ready framework, but a working experiment to understand practical implementation.
+
+---
+
+## Features
+
+* Dynamic DOM understanding
+* AI-driven action decisions
+* Basic exploratory testing flow
+* AI-assisted bug detection (not only assertions)
+* Screenshot-based visual validation
+* Automatic bug reporting
+* Test case generation in Excel
+* Basic exploration memory tracking
+* Allure reporting integration
+* Jenkins-ready execution
+
+---
+
+## Tech Stack
+
+* Python
+* Playwright
+* Pytest
+* Allure Reports
+* Ollama (LLM integration)
+* Pandas / OpenPyXL (Excel handling)
+
+---
+
+## Project Structure (High Level)
+
 ```
-
-## Run individual test files
-
-```bash
-# Full multi-agent run (main entry point)
-pytest run_agents.py --alluredir=allure-results -v -s
-
-# Individual test suites
-pytest tests/test_ai_agent.py       --alluredir=allure-results -v -s
-pytest tests/test_ai_exploratory.py --alluredir=allure-results -v -s
+ai_tester_project/
+│
+├── ai/                # AI logic (decision making, bug detection)
+├── browser/           # Playwright actions, DOM extraction, screenshots
+├── reporting/         # Bug reports, test case generation
+├── config/            # Environment/config files
+├── tests/             # Test execution files
+├── run_agents.py      # Entry point
+└── requirements.txt
 ```
 
 ---
 
-## Why the Allure report was empty before (root causes fixed)
+## Setup Instructions
 
-| # | Problem | Fix |
-|---|---------|-----|
-| 1 | `agent_controller.py` used `multiprocessing.Process` — Allure context is NOT shared across OS processes, so all `allure.attach()` calls inside workers silently disappeared | Replaced with `threading.Thread` — threads share the same process memory and Allure context |
-| 2 | `test_reporter.py` only called `print()` — nothing was attached to Allure | All `log_test()` calls now do `allure.attach()` with JSON |
-| 3 | `testcase_writer.py` saved TCs to Excel but never attached them to Allure | Each TC is now individually attached as a named JSON item |
-| 4 | `generate_bug_report(str, str)` called but function expected `(dict, bool)` — crashed silently | Signature normalised to accept both `str` and `dict` |
-| 5 | Test files had no `@allure.feature` / `@allure.story` decorators — tests appeared as "unknown" | All test functions now have full Allure metadata |
-| 6 | `conftest.py` was missing — `page` fixture not found by pytest-playwright | Added `conftest.py` at project root |
-| 7 | `browser/element_ranker.py` didn't exist — `ImportError` crashed test collection | Created the missing file |
-| 8 | `decision_engine.py` used `ask_ai()` without importing it — `NameError` at runtime | Added `from ai.ai_client import ask_ai` |
-| 9 | TC IDs were all identical (same `timestamp` for every row in one call) | IDs now include row index: `TC_{ts}_{i:03d}` |
-
-## Project Structure
+### 1. Clone the repository
 
 ```
-ai framework/
-├── run_agents.py              ← Main entry point (pytest test)
-├── conftest.py                ← Playwright page fixture
-├── pytest.ini                 ← pytest config (auto --alluredir)
-├── requirements.txt
-│
-├── agents/
-│   ├── agent_controller.py   ← Launches agents as THREADS (was processes)
-│   └── ai_agent_worker.py    ← Full agent loop with all Allure steps
-│
-├── ai/
-│   ├── ai_client.py          ← Ollama wrapper (with history + timeout)
-│   ├── bug_detector.py       ← LLM-based detection + keyword fallback
-│   ├── test_generator.py     ← LLM test case generation
-│   └── parser.py             ← Parses ACTION:/TARGET: from AI output
-│
-├── brain/
-│   ├── decision_engine.py    ← Fixed import; structured prompt
-│   ├── action_executor.py    ← Visibility checks; scroll/navigate support
-│   ├── state_memory.py       ← Action history
-│   └── exploration_tracker.py← Attaches timeline to Allure at end
-│
-├── browser/
-│   ├── dom_extractor.py      ← Added extract_clickable_elements()
-│   ├── element_ranker.py     ← NEW: ranks elements by test priority
-│   ├── screenshot.py         ← Unique timestamped filenames; full_page=True
-│   └── validator.py          ← Element existence check
-│
-├── reporting/
-│   ├── test_reporter.py      ← Fixed: now attaches to Allure
-│   ├── bug_reporter.py       ← Fixed: accepts str or dict input
-│   └── testcase_writer.py    ← Fixed: per-TC Allure attachment; unique IDs
-│
-└── tests/
-    ├── test_ai_agent.py       ← Fixed: Allure decorators + proper assertions
-    └── test_ai_exploratory.py ← Fixed: all NameErrors resolved; Allure decorators
+git clone <your-repo-link>
+cd ai_tester_project
 ```
+
+### 2. Create virtual environment
+
+```
+python -m venv venv
+venv\Scripts\activate   # Windows
+```
+
+### 3. Install dependencies
+
+```
+pip install -r requirements.txt
+```
+
+### 4. Install Playwright browsers
+
+```
+playwright install
+```
+
+### 5. Start Ollama (required for AI)
+
+Make sure Ollama is running locally.
+
+Example:
+
+```
+ollama run llama3
+```
+
+---
+
+## Running the Framework
+
+```
+pytest run_agents.py --headed -s --alluredir=allure-results
+```
+
+### View Allure Report
+
+```
+allure serve allure-results
+```
+
+---
+
+## Jenkins Integration
+
+This project is Jenkins-ready.
+
+Basic steps:
+
+1. Configure job with project path
+2. Install dependencies in build step
+3. Run pytest command
+4. Publish Allure results
+
+---
+
+## What This Project Tries to Explore
+
+* Can AI guide test execution instead of fixed scripts?
+* Can we detect bugs without explicit assertions?
+* How far can exploratory testing be automated?
+
+---
+
+## Limitations
+
+* AI decisions are not always consistent
+* Requires tuning of prompts and inputs
+* Not suitable for production use yet
+* Visual validation is basic (screenshot-based)
+
+---
+
+## Future Improvements
+
+* Risk-based intelligent exploration
+* Better visual comparison (baseline vs diff)
+* Improved bug classification
+* More stable AI decision-making
+
+---
+
+## Note
+
+This project was built as a learning exercise with the help of AI tools and references. The goal was to understand integration and workflow rather than build everything from scratch.
+
+---
+
+## Contributions / Feedback
+
+Feel free to explore, raise issues, or share suggestions.
