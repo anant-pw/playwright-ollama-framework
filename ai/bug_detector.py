@@ -1,54 +1,180 @@
 # ai/bug_detector.py
 #
-# IMPROVEMENT: Much more specific bug detection.
-# Old prompt just asked "is there a bug?" — got false positives on normal
-# words like "error" or "invalid" appearing in UI text.
+# PHASE 1 UPGRADE: Visual Analysis + Better Detection
+# ─────────────────────────────────────────────────────
+# NEW: detect_bug_visual() sends actual screenshots to llava vision model
+#      so bugs like layout breaks, overlapping elements, wrong colors are caught
+#      that text-only analysis would completely miss.
 #
-# New approach:
-# 1. Captures actual console errors and failed network requests (real signals)
-# 2. Structured prompt with specific bug categories to look for
-# 3. Returns severity + category, not just a plain string
-# 4. Deduplication — same bug on same URL not re-reported
+# IMPROVED: detect_bug() now tries visual first, falls back to text if no llava.
+# IMPROVED: Much stricter dedup — won't re-report same bug type on same URL.
 
 import allure
 import json
+import base64
 import hashlib
 import os
-from ai.ollama_client import generate, OllamaUnavailableError
+import requests
+from ai.ollama_client import generate, OllamaUnavailableError, OLLAMA_HOST
 from config import CFG
 
 # Track reported bugs to avoid duplicates within a run
 _reported_hashes: set = set()
 
 _CATEGORIES = [
-    "broken_layout",      # elements overlapping, cut off, invisible
-    "missing_content",    # expected text/images not present
-    "broken_form",        # form fields, validation, submission issues
-    "navigation_error",   # broken links, 404s, wrong redirects
-    "console_error",      # JS exceptions, network failures
-    "auth_issue",         # login, session, permission problems
-    "performance",        # page freeze, infinite spinner, timeout
+    "broken_layout",
+    "missing_content",
+    "broken_form",
+    "navigation_error",
+    "console_error",
+    "auth_issue",
+    "performance",
+    "visual_issue",   # NEW — for llava-detected visual bugs
 ]
+
+# ── Visual model support ──────────────────────────────────────────────────────
+
+def _has_vision_model() -> bool:
+    """Check if llava or any vision model is available in Ollama."""
+    try:
+        r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        models = [m.get("name", "") for m in r.json().get("models", [])]
+        vision_models = [m for m in models if any(
+            v in m.lower() for v in ["llava", "bakllava", "vision", "moondream"]
+        )]
+        if vision_models:
+            print(f"[VISUAL] Vision model available: {vision_models[0]}")
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _get_vision_model() -> str:
+    """Get the best available vision model name."""
+    try:
+        r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        models = [m.get("name", "") for m in r.json().get("models", [])]
+        for m in models:
+            if any(v in m.lower() for v in ["llava", "bakllava", "vision", "moondream"]):
+                return m
+    except Exception:
+        pass
+    return "llava"
+
+
+def detect_bug_visual(screenshot_path: str, page_url: str = "",
+                      page_title: str = "") -> dict:
+    """
+    Send screenshot to llava vision model for visual bug detection.
+    Catches bugs that text analysis misses:
+    - Layout breaks, overlapping elements
+    - Images not loading (broken img tags)
+    - Wrong colors, contrast issues
+    - Cut-off text or buttons
+    - Misaligned UI components
+    """
+    if not screenshot_path or not os.path.exists(screenshot_path):
+        return _no_bug()
+
+    vision_model = _get_vision_model()
+
+    try:
+        # Read and encode screenshot as base64
+        with open(screenshot_path, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode()
+
+        prompt = f"""You are a senior QA engineer reviewing a screenshot of a web page.
+URL: {page_url}
+Page title: {page_title}
+
+Look at this screenshot carefully and identify any REAL visual bugs:
+
+LOOK FOR:
+- Broken layouts (elements overlapping, cut off, outside their containers)
+- Images that failed to load (broken image icons, empty spaces where images should be)
+- Text that is cut off, truncated, or overflowing its container
+- Buttons or links that appear non-functional or visually broken
+- Loading spinners that are stuck or infinite
+- Empty sections where content should be
+- Severely misaligned elements
+- Error messages or HTTP error pages visible
+
+DO NOT REPORT:
+- Normal UI design choices (even if you dislike them)
+- Minor spacing differences
+- Intentional placeholders
+- Things that look normal and functional
+
+Respond in EXACT JSON format:
+{{
+  "found": true or false,
+  "severity": "Critical" or "High" or "Medium" or "Low",
+  "category": "visual_issue" or "broken_layout" or "missing_content" or "broken_form",
+  "title": "short visual bug title (max 10 words)",
+  "description": "what visual problem was found and where (2-3 sentences)"
+}}
+
+If no visual bug found:
+{{"found": false, "severity": "None", "category": "none", "title": "No visual bug", "description": ""}}
+"""
+
+        # Call Ollama with image
+        payload = {
+            "model":  vision_model,
+            "prompt": prompt,
+            "images": [image_b64],
+            "stream": False,
+        }
+
+        response = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json=payload,
+            timeout=(CFG.ollama_connect_timeout, CFG.ollama_read_timeout),
+        )
+        response.raise_for_status()
+        raw = response.json().get("response", "").strip()
+
+        print(f"[VISUAL] llava response ({len(raw)} chars)")
+
+        try:
+            allure.attach(f"Visual analysis via {vision_model}\n\n{raw}",
+                          name="Visual Bug Detection",
+                          attachment_type=allure.attachment_type.TEXT)
+        except Exception:
+            pass
+
+        # Parse JSON
+        clean = raw.strip()
+        if "```" in clean:
+            clean = clean.split("```")[1].lstrip("json").strip()
+
+        result = json.loads(clean)
+        result["raw"]    = raw
+        result["source"] = "visual"
+        return result
+
+    except json.JSONDecodeError:
+        print(f"[VISUAL] Could not parse llava response as JSON")
+        return _no_bug()
+    except Exception as e:
+        print(f"[VISUAL] Visual detection error: {e}")
+        return _no_bug()
 
 
 def collect_page_signals(page) -> dict:
-    """
-    Collect real technical signals from the browser:
-    console errors, failed requests, JS errors.
-    This gives far more reliable bug signals than parsing page text.
-    """
+    """Collect real technical signals from the browser."""
     signals = {
-        "console_errors": [],
+        "console_errors":  [],
         "failed_requests": [],
-        "js_errors": [],
-        "page_title": "",
-        "current_url": "",
+        "js_errors":       [],
+        "page_title":      "",
+        "current_url":     "",
     }
     try:
-        signals["page_title"]   = page.title()
-        signals["current_url"]  = page.url
+        signals["page_title"]  = page.title()
+        signals["current_url"] = page.url
 
-        # Check for visible error indicators in the DOM
         error_selectors = [
             "[class*='error']:visible",
             "[class*='Error']:visible",
@@ -65,33 +191,29 @@ def collect_page_signals(page) -> dict:
                     )
             except Exception:
                 pass
-
     except Exception as e:
         print(f"[BUG] Signal collection error: {e}")
 
     return signals
 
 
-def detect_bug(page_text: str, page_signals: dict = None) -> dict:
+def detect_bug(page_text: str, page_signals: dict = None,
+               screenshot_path: str = None) -> dict:
     """
-    Analyse the page for real bugs.
-    Returns a structured dict:
-      {
-        "found": bool,
-        "severity": "Critical|High|Medium|Low|None",
-        "category": str,
-        "title": str,
-        "description": str,
-        "raw": str
-      }
-    """
-    signals = page_signals or {}
-    console_errors   = signals.get("console_errors", [])
-    failed_requests  = signals.get("failed_requests", [])
-    js_errors        = signals.get("js_errors", [])
-    current_url      = signals.get("current_url", "unknown")
+    Unified bug detection:
+    1. Try visual analysis (llava) if screenshot available
+    2. Fall back to text + signal analysis (llama3)
+    3. Final fallback: pure signal-based detection
 
-    # Build a dedup hash — same page + same errors = same bug
+    Returns structured dict with found/severity/category/title/description.
+    """
+    signals         = page_signals or {}
+    console_errors  = signals.get("console_errors", [])
+    failed_requests = signals.get("failed_requests", [])
+    js_errors       = signals.get("js_errors", [])
+    current_url     = signals.get("current_url", "unknown")
+
+    # Dedup check
     sig = hashlib.md5(
         f"{current_url}:{sorted(console_errors)}:{sorted(js_errors)}".encode()
     ).hexdigest()[:8]
@@ -101,6 +223,23 @@ def detect_bug(page_text: str, page_signals: dict = None) -> dict:
                 "title": "Duplicate", "description": "", "raw": "DUPLICATE"}
     _reported_hashes.add(sig)
 
+    # ── 1. Visual analysis via llava ─────────────────────────────────────────
+    if screenshot_path and _has_vision_model():
+        page_title = signals.get("page_title", "")
+        visual_result = detect_bug_visual(screenshot_path, current_url, page_title)
+        if visual_result.get("found"):
+            print(f"[VISUAL] Bug found visually: {visual_result.get('title')}")
+            try:
+                allure.attach(
+                    json.dumps(visual_result, indent=2),
+                    name="Visual Bug Found",
+                    attachment_type=allure.attachment_type.JSON,
+                )
+            except Exception:
+                pass
+            return visual_result
+
+    # ── 2. Text + signal analysis via llama3 ─────────────────────────────────
     prompt = f"""You are a senior QA engineer doing exploratory testing on a web application.
 
 URL: {current_url}
@@ -114,21 +253,20 @@ PAGE CONTENT (first 2000 chars):
 {page_text[:2000]}
 
 TASK: Identify REAL bugs. Do NOT report:
-- Normal UI text that happens to contain words like "error" or "invalid"
-- Expected validation messages shown intentionally
+- Normal UI text containing words like "error" or "invalid"
+- Expected validation messages
 - Marketing copy or placeholder text
-- Things that are working as designed
+- Working as designed
 
 DO report:
 - JavaScript exceptions or stack traces
 - HTTP 4xx/5xx errors
-- Elements that are broken, missing, or overlapping unexpectedly
+- Broken or missing elements
 - Forms that cannot be submitted
-- Infinite loading spinners
-- Authentication/session failures
+- Authentication failures
 - Content that failed to load
 
-Respond in this EXACT JSON format (no other text):
+Respond in EXACT JSON:
 {{
   "found": true or false,
   "severity": "Critical" or "High" or "Medium" or "Low",
@@ -137,8 +275,7 @@ Respond in this EXACT JSON format (no other text):
   "description": "what is broken and how to reproduce (2-3 sentences)"
 }}
 
-If no real bug found, respond:
-{{"found": false, "severity": "None", "category": "none", "title": "No bug", "description": ""}}
+If no bug: {{"found": false, "severity": "None", "category": "none", "title": "No bug", "description": ""}}
 """
 
     try:
@@ -153,16 +290,15 @@ If no real bug found, respond:
         if not raw_result:
             return _no_bug()
 
-        # Parse JSON response
         clean = raw_result.strip()
         if "```" in clean:
             clean = clean.split("```")[1].lstrip("json").strip()
 
         result = json.loads(clean)
-        result["raw"] = raw_result
+        result["raw"]    = raw_result
+        result["source"] = "text"
 
     except (json.JSONDecodeError, OllamaUnavailableError):
-        # Fall back to signal-based detection if AI fails
         result = _signal_fallback(console_errors, failed_requests, js_errors, raw_result)
 
     try:
@@ -171,7 +307,7 @@ If no real bug found, respond:
                       attachment_type=allure.attachment_type.TEXT)
         if result["found"]:
             allure.attach(json.dumps(result, indent=2),
-                          name="Bug Details (structured)",
+                          name="Bug Details",
                           attachment_type=allure.attachment_type.JSON)
     except Exception:
         pass
@@ -181,24 +317,24 @@ If no real bug found, respond:
 
 def _no_bug() -> dict:
     return {"found": False, "severity": "None", "category": "none",
-            "title": "No bug", "description": "", "raw": "NO BUG"}
+            "title": "No bug", "description": "", "raw": "NO BUG", "source": "none"}
 
 
 def _signal_fallback(console_errors, failed_requests, js_errors, raw) -> dict:
-    """Used when AI is unavailable — rely purely on technical signals."""
+    """Pure signal-based detection when AI is unavailable."""
     if console_errors:
         return {"found": True, "severity": "High", "category": "console_error",
                 "title": "Console errors detected",
                 "description": f"Console errors: {console_errors[:3]}",
-                "raw": raw}
+                "raw": raw, "source": "signals"}
     if failed_requests:
         return {"found": True, "severity": "High", "category": "navigation_error",
                 "title": "Network requests failed",
                 "description": f"Failed requests: {failed_requests[:3]}",
-                "raw": raw}
+                "raw": raw, "source": "signals"}
     if js_errors:
         return {"found": True, "severity": "Medium", "category": "console_error",
                 "title": "Visible error messages",
                 "description": f"Error elements found: {js_errors[:3]}",
-                "raw": raw}
+                "raw": raw, "source": "signals"}
     return _no_bug()

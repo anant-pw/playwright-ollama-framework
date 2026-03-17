@@ -1,5 +1,5 @@
 # config.py — Central configuration loader.
-# Reads config.env → populates CFG → every module does: from config import CFG
+# PHASE 1: Added login credentials support
 
 import os
 from pathlib import Path
@@ -45,7 +45,7 @@ class Config:
     max_steps:        int  = 5
     page_timeout:     int  = 60_000
 
-    # Browser stealth — fixes ERR_HTTP2_PROTOCOL_ERROR on sites that block bots
+    # Stealth
     user_agent:       str  = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) "
                               "Chrome/123.0.0.0 Safari/537.36")
@@ -53,6 +53,11 @@ class Config:
     viewport_height:  int  = 800
     locale:           str  = "en-US"
     timezone:         str  = "America/New_York"
+
+    # ── NEW: Login credentials ───────────────────────────────────────────────
+    login_email:    str = ""   # Set LOGIN_EMAIL in config.env
+    login_password: str = ""   # Set LOGIN_PASSWORD in config.env
+    login_url:      str = ""   # Optional: specific login URL to navigate to first
 
     # Ollama
     ollama_host:             str = "http://localhost:11434"
@@ -69,17 +74,6 @@ class Config:
     tc_file:            str = "generated_test_cases.xlsx"
 
     def browser_context_kwargs(self) -> dict:
-        """
-        Returns kwargs to pass directly into browser.new_context().
-        Centralises ALL anti-bot / stealth settings in one place.
-
-        Why each setting matters for ERR_HTTP2_PROTOCOL_ERROR:
-        - user_agent     : default Playwright UA is detected as a bot by WAFs
-        - viewport       : headless default (800x600) is a known bot fingerprint
-        - locale/timezone: mismatched locale+TZ triggers Cloudflare & similar
-        - java_script_enabled: some sites 302 redirect non-JS clients to an error
-        - http_credentials: not set here but easy to add for Basic Auth sites
-        """
         return {
             "user_agent":          self.user_agent,
             "viewport":            {"width": self.viewport_width, "height": self.viewport_height},
@@ -87,48 +81,51 @@ class Config:
             "timezone_id":         self.timezone,
             "java_script_enabled": True,
             "accept_downloads":    False,
-            "ignore_https_errors": True,   # don't fail on self-signed certs
+            "ignore_https_errors": True,
         }
 
     def browser_launch_kwargs(self) -> dict:
-        """
-        Returns kwargs to pass directly into p.chromium.launch() etc.
-        --disable-http2 is the direct fix for ERR_HTTP2_PROTOCOL_ERROR —
-        forces HTTP/1.1 which most sites handle fine.
-        """
         return {
             "headless": self.headless,
             "args": [
-                "--disable-http2",                 # direct fix for the H2 error
-                "--disable-blink-features=AutomationControlled",  # hide webdriver flag
+                "--disable-http2",
+                "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--ignore-certificate-errors",
+                "--disable-web-security",
             ],
         }
 
     def summary(self) -> str:
+        login_status = (
+            f"  Login Email     : {self.login_email or '(not configured)'}\n"
+            f"  Login Password  : {'***' if self.login_password else '(not configured)'}\n"
+        )
         lines = [
-            "═" * 58,
-            "  AI FRAMEWORK — ACTIVE CONFIGURATION",
-            "═" * 58,
+            "=" * 58,
+            "  AI FRAMEWORK - ACTIVE CONFIGURATION",
+            "=" * 58,
             f"  Target URLs       : {', '.join(self.target_urls)}",
             f"  Browser           : {self.browser}  (headless={self.headless})",
             f"  Max steps/URL     : {self.max_steps}",
             f"  Page timeout      : {self.page_timeout}ms",
-            f"  User-Agent        : {self.user_agent[:60]}…",
-            f"  Viewport          : {self.viewport_width}×{self.viewport_height}",
+            f"  User-Agent        : {self.user_agent[:60]}...",
+            f"  Viewport          : {self.viewport_width}x{self.viewport_height}",
             f"  Locale / TZ       : {self.locale} / {self.timezone}",
-            "─" * 58,
+            "-" * 58,
             f"  Ollama host       : {self.ollama_host}",
             f"  Ollama model      : {self.ollama_model}",
             f"  Read timeout      : {self.ollama_read_timeout}s",
             f"  Retries           : {self.ollama_retries}",
-            "─" * 58,
+            "-" * 58,
+            login_status.rstrip(),
+            "-" * 58,
             f"  Allure results    : {self.allure_results_dir}/",
             f"  Bug reports       : {self.bug_reports_dir}/",
             f"  Screenshots       : {self.screenshots_dir}/",
             f"  TC Excel file     : {self.tc_file}",
-            "═" * 58,
+            "=" * 58,
         ]
         return "\n".join(lines)
 
@@ -147,6 +144,12 @@ CFG = Config(
     viewport_height        = _env_int("VIEWPORT_HEIGHT", 800),
     locale                 = _env("LOCALE",   "en-US"),
     timezone               = _env("TIMEZONE", "America/New_York"),
+
+    # NEW login credentials
+    login_email            = _env("LOGIN_EMAIL",    ""),
+    login_password         = _env("LOGIN_PASSWORD", ""),
+    login_url              = _env("LOGIN_URL",       ""),
+
     ollama_host            = _env("OLLAMA_HOST",               "http://localhost:11434"),
     ollama_model           = _env("OLLAMA_MODEL",              "llama3"),
     ollama_read_timeout    = _env_int("OLLAMA_READ_TIMEOUT",    300),

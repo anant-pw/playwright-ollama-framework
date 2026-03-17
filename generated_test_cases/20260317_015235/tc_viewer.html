@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>Test Cases — Run 20260317_015235</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f5f7;color:#172b4d}
+.header{background:#0052cc;color:white;padding:20px 32px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:20px;font-weight:600}
+.header p{font-size:12px;opacity:.8;margin-top:3px}
+.run-selector{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
+  color:white;padding:6px 10px;border-radius:6px;font-size:12px}
+.run-selector option{color:#172b4d;background:white}
+.dl-btn{padding:8px 16px;background:white;color:#0052cc;border-radius:6px;
+  text-decoration:none;font-weight:700;font-size:12px;white-space:nowrap}
+.toolbar{background:white;padding:10px 32px;border-bottom:1px solid #dfe1e6;
+  display:flex;gap:12px;align-items:center}
+.search{padding:7px 12px;border:1px solid #dfe1e6;border-radius:6px;font-size:13px;width:260px}
+.count{color:#6b778c;font-size:12px}
+.container{padding:20px 32px}
+table{width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;
+  box-shadow:0 1px 3px rgba(0,0,0,.07)}
+th{background:#f4f5f7;padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
+  color:#6b778c;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #dfe1e6}
+td{padding:10px 12px;border-bottom:1px solid #f4f5f7;font-size:13px;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8f9ff}
+.tc-id{font-family:monospace;font-size:11px;color:#6b778c;white-space:nowrap}
+.tc-title{font-weight:600;color:#0052cc}
+.tc-url{font-size:11px;color:#6b778c}
+.tc-date{font-size:11px;color:#6b778c;white-space:nowrap}
+.hidden{display:none}
+</style></head><body>
+<div class="header">
+  <div>
+    <h1>🧪 Test Cases</h1>
+    <p>Run 20260317_015235 · 10 test cases</p>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <select class="run-selector" onchange="location.href='../'+this.value">
+      <option value="20260317_015235/tc_viewer.html" selected>20260317_015235 (10 TCs)</option>
+<option value="20260317_011735/tc_viewer.html">20260317_011735 (5 TCs)</option>
+    </select>
+    <a class="dl-btn"
+       href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,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"
+       download="test_cases_20260317_015235.xlsx">⬇ Excel</a>
+  </div>
+</div>
+<div class="toolbar">
+  <input class="search" type="text" placeholder="Search…" oninput="search(this.value)">
+  <span class="count" id="count">10 test cases</span>
+  <span style="color:#6b778c;font-size:12px;margin-left:auto">Generated: 2026-03-17 02:15</span>
+</div>
+<div class="container">
+  <table><thead>
+    <tr><th>Test ID</th><th>Title</th><th>Steps</th><th>Expected</th><th>URL</th><th>Created</th></tr>
+  </thead><tbody id="tbody"><tr>
+          <td class="tc-id">TC_1773692733_002</td>
+          <td class="tc-title">Test Case 1: Search by Voice Input</td>
+          <td>Steps: Enter text into voiceSearchInput field, click SEARCH button</td>
+          <td>Expected Result: The search results should be displayed.</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 01:55:33</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773692733_004</td>
+          <td class="tc-title">Test Case 2: Create Profile and AI Resume Builder</td>
+          <td>Steps: Click CREATE YOUR PROFILE button, fill out required fields, click AI RESUME BUILDER button</td>
+          <td>Expected Result: A new page with an AI resume builder should be opened, allowing the user to create their profile and AI-powered resume.</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 01:55:33</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773692733_006</td>
+          <td class="tc-title">Test Case 3: Validate Search Keywords</td>
+          <td>Steps: Enter invalid search keywords into SEARCH KEYWORDS field, click SEARCH button</td>
+          <td>Expected Result: An error message should appear indicating that the search keywords are invalid or not found.</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 01:55:33</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773692733_008</td>
+          <td class="tc-title">Test Case 4: Check Analytics Link Functionality</td>
+          <td>Steps: Click Analytics link in the top right corner of the page</td>
+          <td>Expected Result: The user should be taken to a new page with analytics data or a confirmation message indicating that the link works as expected.</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 01:55:33</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773692733_010</td>
+          <td class="tc-title">Test Case 5: Skip to Content Button Functionality</td>
+          <td>Steps: Click SKIP TO CONTENT button at the top of the page</td>
+          <td>Expected Result: The user should be taken directly to the main content area of the page, skipping any unnecessary navigation.</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 01:55:33</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773693344_000</td>
+          <td class="tc-title">Click the "SEARCH" button.</td>
+          <td>| The search results page should be displayed with relevant profiles matching the entered keyword.</td>
+          <td>Test completes without errors</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 02:05:44</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773693344_001</td>
+          <td class="tc-title">Click the "CREATE YOUR PROFILE" button.</td>
+          <td>| A new browser tab or window should open, prompting the user to create a new profile.</td>
+          <td>Test completes without errors</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 02:05:44</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773693344_002</td>
+          <td class="tc-title">Click the "SKIP TO CONTENT" link.</td>
+          <td>| The page should scroll directly to the main content area, bypassing any navigation elements.</td>
+          <td>Test completes without errors</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 02:05:44</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773693344_003</td>
+          <td class="tc-title">Enter a valid keyword (e.g., "software engineer") in the "voiceSearchInput" field and try submitting it.</td>
+          <td>| The form should validate by displaying an error message for invalid inputs, and submit successfully with a valid input.</td>
+          <td>Test completes without errors</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 02:05:44</td>
+        </tr><tr>
+          <td class="tc-id">TC_1773693344_004</td>
+          <td class="tc-title">Click the "AI RESUME BUILDER" button.</td>
+          <td>| A new browser tab or window should open, guiding the user through the process of building their resume using AI-powered tools.</td>
+          <td>Test completes without errors</td>
+          <td class="tc-url" title="https://bold.pro/">https://bold.pro/…</td>
+          <td class="tc-date">2026-03-17 02:05:44</td>
+        </tr></tbody></table>
+</div>
+<script>
+function search(q){
+  const rows=document.querySelectorAll('#tbody tr');
+  let v=0; q=q.toLowerCase();
+  rows.forEach(r=>{const m=r.textContent.toLowerCase().includes(q);r.classList.toggle('hidden',!m);if(m)v++;});
+  document.getElementById('count').textContent=v+' test cases';
+}
+</script></body></html>
