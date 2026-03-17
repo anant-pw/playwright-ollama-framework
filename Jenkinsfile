@@ -14,6 +14,9 @@ pipeline {
                 bat 'playwright install'
                 bat 'set PYTHONIOENCODING=utf-8'
                 bat 'set PYTHONUNBUFFERED=1'
+                // Pass parameters to tests
+                bat "set TARGET_URLS=%TARGET_URLS%"
+                bat "set BROWSER=%BROWSER%"
             }
         }
         
@@ -28,26 +31,43 @@ pipeline {
     post {
         always {
             script {
-                // Generate Allure Report
+                echo "🔥 Generating ALL reports..."
+                
+                // 1. Allure Report (Main Dashboard)
                 allure([
                     includeProperties: false,
                     jdk: '',
                     results: [[path: 'allure-results']]
                 ])
                 
-                // Publish HTML reports
+                // 2. Test Cases Viewer (🧪 TC Dashboard)
                 publishHTML([
-                    allowMissing: false,
+                    allowMissing: true,
                     alwaysLinkToLastBuild: true,
                     keepAll: true,
-                    reportDir: 'allure-report',
-                    reportFiles: 'index.html',
-                    reportName: 'Allure Report'
+                    reportDir: 'generated_test_cases',
+                    reportFiles: '**/*.html',
+                    reportName: '🧪 Test Cases Viewer'
                 ])
                 
-                // Archive artifacts
-                archiveArtifacts artifacts: 'allure-results/**, bug_reports/**, screenshots/**', 
-                               allowEmptyArchive: true
+                // 3. Bug Reports Viewer (🐛 Bug Dashboard)
+                publishHTML([
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'bug_reports',
+                    reportFiles: '**/*.html',
+                    reportName: '🐛 Bug Reports'
+                ])
+                
+                // 4. Archive ALL files (Excel + Screenshots)
+                archiveArtifacts(
+                    artifacts: 'allure-results/**, generated_test_cases/**, bug_reports/**, screenshots/**, *.xlsx',
+                    allowEmptyArchive: true,
+                    fingerprint: true
+                )
+                
+                echo "✅ Dashboard ready! Check links above."
             }
         }
     }
