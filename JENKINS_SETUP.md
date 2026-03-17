@@ -145,7 +145,7 @@ Python venv or Ollama. Fix this:
 1. Go to your `AI-Test-Framework` job
 2. Click **Build with Parameters**
 3. Set:
-   - TARGET_URLS: `https://myperfectresume.com/signin`
+   - TARGET_URLS: `https://courses.ultimateqa.com/users/sign_in`
    - BROWSER: `chromium`
    - MAX_STEPS: `2` (use 2 for the first test run — faster)
    - OLLAMA_MODEL: `llama3`
