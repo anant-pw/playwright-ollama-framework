@@ -30,6 +30,16 @@ pipeline {
                 allure includeProperties: false, 
                        results: [[path: 'allure-results']]
             }
+            post {
+                always {
+                    // Generate Allure report EVEN ON FAILURE
+                    allure([
+                        includeProperties: false,
+                        jdk: '',
+                        results: [[path: 'allure-results']]
+                    ])
+                }
+            }
         }
     }
 }
